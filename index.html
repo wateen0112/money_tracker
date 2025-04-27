@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Payment Tracker</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script type="module">
+    // Import Firebase libraries
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/9.23.0/firebase-app.js";
+    import {
+      getFirestore,
+      collection,
+      addDoc,
+      doc,
+      updateDoc,
+      deleteDoc,
+      onSnapshot,
+    } from "https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore.js";
+    import {
+      getAuth,
+      signInWithEmailAndPassword,
+      createUserWithEmailAndPassword,
+    } from "https://www.gstatic.com/firebasejs/9.23.0/firebase-auth.js";
+
+    // Your Firebase configuration
+    const firebaseConfig = {
+      apiKey: "YOUR_API_KEY",
+      authDomain: "YOUR_AUTH_DOMAIN",
+      projectId: "YOUR_PROJECT_ID",
+      storageBucket: "YOUR_STORAGE_BUCKET",
+      messagingSenderId: "YOUR_MESSAGING_SENDER_ID",
+      appId: "YOUR_APP_ID",
+    };
+
+    // Initialize Firebase
+    const app = initializeApp(firebaseConfig);
+    const db = getFirestore(app);
+    const auth = getAuth(app);
+
+    // DOM Elements
+    const loginForm = document.getElementById("loginForm");
+    const paymentForm = document.getElementById("paymentForm");
+    const paymentList = document.getElementById("paymentList");
+    const totalToday = document.getElementById("totalToday");
+    const totalMonth = document.getElementById("totalMonth");
+
+    let currentUser = null;
+
+    // Login/Auth Functions
+    async function login(email, password) {
+      try {
+        await signInWithEmailAndPassword(auth, email, password);
+        currentUser = auth.currentUser;
+        toggleAuthUI();
+        loadPayments();
+      } catch (error) {
+        alert("Login failed: " + error.message);
+      }
+    }
+
+    async function register(email, password) {
+      try {
+        await createUserWithEmailAndPassword(auth, email, password);
+        currentUser = auth.currentUser;
+        toggleAuthUI();
+        loadPayments();
+      } catch (error) {
+        alert("Registration failed: " + error.message);
+      }
+    }
+
+    function toggleAuthUI() {
+      const authSection = document.getElementById("authSection");
+      const appSection = document.getElementById("appSection");
+      authSection.classList.toggle("hidden");
+      appSection.classList.toggle("hidden");
+    }
+
+    // Payment Functions
+    async function addPayment(date, content, price) {
+      await addDoc(collection(db, "payments"), { date, content, price, userId: currentUser.uid });
+    }
+
+    async function editPayment(id, price) {
+      const paymentRef = doc(db, "payments", id);
+      await updateDoc(paymentRef, { price });
+    }
+
+    async function deletePayment(id) {
+      await deleteDoc(doc(db, "payments", id));
+    }
+
+    function calculateTotals(payments) {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+
+      const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
+      const endOfMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0);
+
+      let totalForToday = 0;
+      let totalForMonth = 0;
+
+      payments.forEach((payment) => {
+        const paymentDate = new Date(payment.date);
+        if (paymentDate >= startOfMonth && paymentDate <= endOfMonth) {
+          totalForMonth += parseFloat(payment.price);
+          if (paymentDate.getTime() === today.getTime()) {
+            totalForToday += parseFloat(payment.price);
+          }
+        }
+      });
+
+      totalToday.textContent = `$${totalForToday.toFixed(2)}`;
+      totalMonth.textContent = `$${totalForMonth.toFixed(2)}`;
+    }
+
+    function renderPayments(payments) {
+      paymentList.innerHTML = "";
+      payments.forEach((payment) => {
+        const row = document.createElement("tr");
+
+        row.innerHTML = `
+          <td class="p-2">${payment.date}</td>
+          <td class="p-2">${payment.content}</td>
+          <td class="p-2">$${parseFloat(payment.price).toFixed(2)}</td>
+          <td class="p-2">
+            <button onclick="editPayment('${payment.id}', prompt('New Price'))" class="text-blue-500 mr-2">Edit</button>
+            <button onclick="deletePayment('${payment.id}')" class="text-red-500">Delete</button>
+          </td>
+        `;
+
+        paymentList.appendChild(row);
+      });
+
+      calculateTotals(payments);
+    }
+
+    function loadPayments() {
+      const paymentsRef = collection(db, "payments");
+      onSnapshot(paymentsRef, (snapshot) => {
+        const payments = snapshot.docs
+          .filter((doc) => doc.data().userId === currentUser.uid)
+          .map((doc) => ({ id: doc.id, ...doc.data() }));
+        renderPayments(payments);
+      });
+    }
+
+    // Event Listeners
+    loginForm.addEventListener("submit", (e) => {
+      e.preventDefault();
+      const email = document.getElementById("email").value;
+      const password = document.getElementById("password").value;
+      login(email, password);
+    });
+
+    paymentForm.addEventListener("submit", (e) => {
+      e.preventDefault();
+      const date = document.getElementById("date").value;
+      const content = document.getElementById("content").value;
+      const price = document.getElementById("price").value;
+      addPayment(date, content, price);
+      paymentForm.reset();
+    });
+  </script>
+</head>
+<body class="bg-gray-100 min-h-screen flex flex-col items-center py-8">
+  <!-- Auth Section -->
+  <div id="authSection" class="w-full max-w-md bg-white p-6 rounded-lg shadow-md">
+    <h1 class="text-2xl font-bold text-center mb-6">Login/Register</h1>
+    <form id="loginForm" class="mb-6">
+      <input
+        type="email"
+        id="email"
+        placeholder="Email"
+        class="p-2 border rounded-md w-full mb-4"
+        required
+      />
+      <input
+        type="password"
+        id="password"
+        placeholder="Password"
+        class="p-2 border rounded-md w-full mb-4"
+        required
+      />
+      <button
+        type="submit"
+        class="w-full bg-blue-500 text-white py-2 rounded-md hover:bg-blue-600 transition"
+      >
+        Login
+      </button>
+      <button
+        type="button"
+        onclick="register(document.getElementById('email').value, document.getElementById('password').value)"
+        class="mt-4 w-full bg-green-500 text-white py-2 rounded-md hover:bg-green-600 transition"
+      >
+        Register
+      </button>
+    </form>
+  </div>
+
+  <!-- App Section -->
+  <div id="appSection" class="w-full max-w-3xl bg-white p-6 rounded-lg shadow-md hidden">
+    <h1 class="text-2xl font-bold text-center mb-6">Payment Tracker</h1>
+
+    <!-- Input Form -->
+    <form id="paymentForm" class="mb-6">
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <input
+          type="date"
+          id="date"
+          class="p-2 border rounded-md"
+          required
+        />
+        <input
+          type="text"
+          id="content"
+          placeholder="Content"
+          class="p-2 border rounded-md"
+          required
+        />
+        <input
+          type="number"
+          id="price"
+          placeholder="Price"
+          step="0.01"
+          class="p-2 border rounded-md"
+          required
+        />
+      </div>
+      <button
+        type="submit"
+        class="mt-4 w-full bg-blue-500 text-white py-2 rounded-md hover:bg-blue-600 transition"
+      >
+        Add Payment
+      </button>
+    </form>
+
+    <!-- Totals -->
+    <div class="flex justify-between mb-6">
+      <div>
+        <p class="font-semibold">Total Today:</p>
+        <p id="totalToday">$0.00</p>
+      </div>
+      <div>
+        <p class="font-semibold">Total Month:</p>
+        <p id="totalMonth">$0.00</p>
+      </div>
+    </div>
+
+    <!-- Payment List -->
+    <table class="w-full border-collapse">
+      <thead>
+        <tr class="bg-gray-200">
+          <th class="p-2 text-left">Date</th>
+          <th class="p-2 text-left">Content</th>
+          <th class="p-2 text-left">Price</th>
+          <th class="p-2 text-left">Actions</th>
+        </tr>
+      </thead>
+      <tbody id="paymentList">
+        <!-- Payment rows will be dynamically added here -->
+      </tbody>
+    </table>
+  </div>
+</body>
+</html>
